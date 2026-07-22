@@ -20,4 +20,4 @@ while True:
     elif choice.lower() == "exit":
         break 
     else:
-        print("Please enter 1 or 2.")
+        print("Please enter 1 or 2 or exit")

@@ -1,119 +1,74 @@
 from app2 import ask_roey_for_gif
-import base64
-import io
-import json
 import os
 import urllib.parse
 from anthropic import Anthropic
 from dotenv import load_dotenv
-from PIL import Image
 
 load_dotenv()
 
-client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-
-# --- MODELS ---
-TEXT_MODEL = "claude-3-haiku-20240307"  # Ultra cheap for normal text chat
-VISION_MODEL = "claude-3-5-sonnet-20241022"  # Used for vision & complex tools
-
-# --- TOKEN OPTIMIZATION HELPERS ---
-
-
-def encode_and_compress_image(image_path: str, max_dim=1024) -> str:
-    """Compresses image to ~1024px JPEG to save up to 80% of vision tokens."""
-    with Image.open(image_path) as img:
-        img.thumbnail((max_dim, max_dim))
-        buffer = io.BytesIO()
-        img.convert("RGB").save(buffer, format="JPEG", quality=80)
-        return base64.b64encode(buffer.getvalue()).decode("utf-8")
-
-
-def get_optimized_history(history, max_messages=6):
-    """Keeps only the most recent N messages to prevent context window bloat."""
-    return history[-max_messages:]
-
-
-# --- TOOL FUNCTIONS ---
+client = Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
 
 
 def search_youtube(query: str) -> str:
+    """Helper function to create a YouTube search link."""
     encoded_query = urllib.parse.quote(query)
     return f"YouTube search for '{query}': https://www.youtube.com/results?search_query={encoded_query}"
 
 
-def search_web_or_recipes(query: str) -> str:
-    encoded_query = urllib.parse.quote(f"{query} recipe")
-    return f"Recipe search for '{query}': https://www.google.com/search?q={encoded_query}"
-
-
-def start_cooking_timer(seconds: int, label: str = "Timer") -> str:
-    return f"Timer set for {label} ({seconds} seconds)."
-
-
-def execute_tool(tool_name: str, tool_input: dict) -> str:
-    if tool_name == "search_youtube":
-        return search_youtube(tool_input.get("query", ""))
-    elif tool_name == "search_recipe_web":
-        return search_web_or_recipes(tool_input.get("query", ""))
-    elif tool_name == "start_timer":
-        return start_cooking_timer(
-            tool_input.get("seconds", 60), tool_input.get("label", "Timer")
-        )
-    return "Tool not found."
-
-
-# --- ANTHROPIC TOOL DEFINITIONS (CONCISE) ---
-
 tools = [
     {
         "name": "search_youtube",
-        "description": "Search YouTube cooking videos.",
-        "input_schema": {
-            "type": "object",
-            "properties": {"query": {"type": "string"}},
-            "required": ["query"],
-        },
-    },
-    {
-        "name": "search_recipe_web",
-        "description": "Search web for recipes or cooking tips.",
-        "input_schema": {
-            "type": "object",
-            "properties": {"query": {"type": "string"}},
-            "required": ["query"],
-        },
-    },
-    {
-        "name": "start_timer",
-        "description": "Set a cooking timer.",
+        "description": "Search YouTube for cooking tutorial videos, recipes, or technique demonstrations.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "seconds": {"type": "integer"},
-                "label": {"type": "string"},
+                "query": {
+                    "type": "string",
+                    "description": "Search query for YouTube (e.g., 'how to julienne an onion')"
+                }
             },
-            "required": ["seconds"],
-        },
-    },
+            "required": ["query"],
+        }
+    }
 ]
-
-# --- MAIN APP ---
 
 
 def run_chat():
-    print("--- Chef Coco (Token-Optimized) ---")
-    print("Commands: 'exit' to quit | 'image:<path>' to analyze dish photo\n")
+    print('You: (type exit to quit)')
 
-    # Ultra-concise system prompt to save baseline tokens
-    system_message = (
-        "You are Chef Coco, a friendly culinary assistant. Keep answers concise and actionable. "
-        "Provide direct cooking steps, substitutions, and basic nutrition estimates when asked."
-    )
+    system_message = """
+You are coco, a professional chef and cooking assistant.
+
+
+
+Your job is to help users cook delicious meals, improve their cooking skills, recommend recipes, explain cooking techniques, suggest ingredient substitutions, and provide meal ideas based on the ingredients they have.
+
+
+
+Rules:
+
+- Always give clear, step-by-step cooking instructions.
+
+- Always suggest helpful cooking tips or ingredient substitutions when appropriate.
+
+- Never provide unsafe food-handling advice or recipes that could be harmful.
+
+
+
+Response format:
+
+- Start with a one-sentence summary of what the user said.
+
+- Then provide the recipe, cooking advice, or answer using clear steps or bullet points.
+
+- End with one follow-up question to help the user continue cooking.
+
+"""
 
     history = []
 
     while True:
-        user_input = input("\nYou: ").strip()
+        user_input = input('>> ').strip()
 
         if user_input.lower() == "exit":
             print("Chef Coco signing off. Happy cooking!")
@@ -122,113 +77,62 @@ def run_chat():
         if not user_input:
             continue
 
-        selected_model = TEXT_MODEL
+        history.append({'role': 'user', 'content': user_input})
 
-        # Handle image analysis
-        if user_input.startswith("image:"):
-            img_path = user_input.replace("image:", "").strip()
-            if os.path.exists(img_path):
-                b64_img = encode_and_compress_image(img_path)
-                selected_model = (
-                    VISION_MODEL  # Switch to Sonnet for vision processing
-                )
-
-                messages_to_send = get_optimized_history(history) + [
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "image",
-                                "source": {
-                                    "type": "base64",
-                                    "media_type": "image/jpeg",
-                                    "data": b64_img,
-                                },
-                            },
-                            {
-                                "type": "text",
-                                "text": "Identify this food, estimate nutrition, and suggest a recipe.",
-                            },
-                        ],
-                    }
-                ]
-
-                # Store lightweight placeholder string in long-term history to avoid resending image data
-                history.append(
-                    {"role": "user", "content": f"[Analyzed image: {img_path}]"}
-                )
-            else:
-                print(f"Error: File not found at '{img_path}'")
-                continue
-        else:
-            history.append({"role": "user", "content": user_input})
-            messages_to_send = get_optimized_history(history)
-
-        # First API call
+        # Send request with tool definition included
         response = client.messages.create(
-            model=selected_model,
-            max_tokens=350,
+            model='claude-3-5-sonnet-20241022',
+            max_tokens=500,
             temperature=0.7,
             system=system_message,
             tools=tools,
-            messages=messages_to_send,
+            messages=history
         )
 
-        # Handle tool call
+        # Handle tool call if Claude decides to search YouTube
         if response.stop_reason == "tool_use":
-            tool_use = next(
-                block for block in response.content if block.type == "tool_use"
-            )
-            tool_name = tool_use.name
-            tool_input = tool_use.input
+            # Append Claude's request to conversation history
+            history.append({'role': 'assistant', 'content': response.content})
 
-            print(f"\n[Chef Coco used tool: {tool_name}]")
-            tool_result = execute_tool(tool_name, tool_input)
+            # Process tool execution
+            tool_results = []
+            for block in response.content:
+                if block.type == "tool_use":
+                    if block.name == "search_youtube":
+                        query = block.input.get("query", "")
+                        result_str = search_youtube(query)
 
-            # Append assistant's tool intent and tool result back to history
-            history.append({"role": "assistant", "content": response.content})
-            history.append(
-                {
-                    "role": "user",
-                    "content": [
-                        {
+                        tool_results.append({
                             "type": "tool_result",
-                            "tool_use_id": tool_use.id,
-                            "content": tool_result,
-                        }
-                    ],
-                }
-            )
+                            "tool_use_id": block.id,
+                            "content": result_str
+                        })
 
-            # Second API call to complete tool response (using Sonnet for tool synthesis)
-            final_response = client.messages.create(
-                model=VISION_MODEL,
-                max_tokens=350,
+            # Send tool execution results back to Claude
+            history.append({'role': 'user', 'content': tool_results})
+
+            # Fetch final response after tool call
+            response = client.messages.create(
+                model='claude-3-5-sonnet-20241022',
+                max_tokens=500,
                 temperature=0.7,
                 system=system_message,
                 tools=tools,
-                messages=get_optimized_history(history),
+                messages=history
             )
 
-            reply_text = final_response.content[0].text
-            print(f"\nCoco: {reply_text}")
-            history.append({"role": "assistant", "content": reply_text})
-
-            if tool_name in ["search_recipe_web", "search_youtube"]:
-                searched_dish = tool_input.get("query", "food")
+         if tool_name in [ "search_youtube"]:
+                searched_dish = tool_input.get("query")
                 roey_comment, roey_gif = ask_roey_for_gif(searched_dish)
                 print(f"Roey: {roey_comment}")
                 if roey_gif:
                     print(f"GIF: {roey_gif}")
 
-        
+        # Extract text response blocks
+        reply = "".join([block.text for block in response.content if block.type == "text"])
 
-
-
-        else:
-            reply_text = response.content[0].text
-            print(f"\nCoco: {reply_text}")
-            history.append({"role": "assistant", "content": reply_text})
+        print(f'\nClaude: {reply}\n')
+        history.append({'role': 'assistant', 'content': reply})
 
 
 if __name__ == "__main__":
