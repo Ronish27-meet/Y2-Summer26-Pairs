@@ -22,6 +22,25 @@ def get_gif(search_term):
         pass
     return ""
 
+def ask_roey_for_gif(dish_name):
+    roey_prompt = f"Coco found a recipe for '{dish_name}'. Give a 1-sentence funny reaction and add 'GIF_SEARCH: <words>' at the end."
+    
+    response = client.messages.create(
+        model='claude-3-haiku-20240307',
+        max_tokens=100,
+        messages=[{'role': 'user', 'content': roey_prompt}]
+    )
+    
+    reply = response.content[0].text
+    gif_url = ""
+    
+    if "GIF_SEARCH:" in reply:
+        text_part, search_part = reply.split("GIF_SEARCH:", 1)
+        reply = text_part.strip()
+        gif_url = get_gif(search_part.strip())
+
+    return reply, gif_url
+
 def run_chat():
     print('You: (type exit to quit)')
     

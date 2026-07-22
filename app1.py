@@ -1,3 +1,4 @@
+from app2 import ask_roey_for_gif
 import base64
 import io
 import json
@@ -212,6 +213,17 @@ def run_chat():
             reply_text = final_response.content[0].text
             print(f"\nCoco: {reply_text}")
             history.append({"role": "assistant", "content": reply_text})
+
+            if tool_name in ["search_recipe_web", "search_youtube"]:
+                searched_dish = tool_input.get("query", "food")
+                roey_comment, roey_gif = ask_roey_for_gif(searched_dish)
+                print(f"Roey: {roey_comment}")
+                if roey_gif:
+                    print(f"GIF: {roey_gif}")
+
+        
+
+
 
         else:
             reply_text = response.content[0].text
